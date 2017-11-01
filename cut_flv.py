@@ -1,4 +1,4 @@
-import sys
+import sys,os
 import logging
 
 from optparse import OptionParser
@@ -10,9 +10,19 @@ from constants import H264_PACKET_TYPE_NALU
 from astypes import MalformedFLV, FLVObject
 from tags import FLV, EndOfFile, AudioTag, VideoTag, ScriptTag
 
-
 log = logging.getLogger('flvlib.cut-flv')
 
+def get_next_unuse_name(absfilename):
+    srcFileName, ext=os.path.splitext(absfilename)
+    cut_index = srcFileName.find('_cut')
+    if cut_index != -1:
+        cur_num_str = srcFileName[cut_index + 4:]
+        cur_num = int(cur_num_str)
+        next_num = cur_num + 1
+        next_num_str = str(next_num).zfill(3)
+        return srcFileName[:cut_index + 4]+next_num_str+ext
+    else:
+        return srcFileName+'_cut001'+ext
 
 class CuttingAudioTag(AudioTag):
 
@@ -63,8 +73,8 @@ class CuttingFLV(FLV):
             raise MalformedFLV("Invalid tag type: %d", tag_type)
 
 
-def cut_file(inpath, outpath, start_time, end_time):
-    print("Cutting file `%s' into file `%s'"%(inpath, outpath))
+def cut_file(inpath, start_time, interval_time):
+    print("Cutting file '%s' interval_time=%s"%(inpath, interval_time))
 
     try:
         f = open(inpath, 'rb')
@@ -73,28 +83,25 @@ def cut_file(inpath, outpath, start_time, end_time):
         log.error("Failed to open `%s': %s", inpath, strerror)
         return False
 
-    try:
-        fo = open(outpath, 'wb')
-    except IOError as xxx_todo_changeme1:
-        (errno, strerror) = xxx_todo_changeme1.args
-        log.error("Failed to open `%s': %s", outpath, strerror)
-        return False
-
     if start_time is None:
         start_time = 0
     else:
         start_time = int(start_time)
-    if end_time is None:
+        
+    if interval_time is None:
         end_time = -1
     else:
-        end_time = int(end_time)
+        end_time = start_time + int(interval_time)
 
+    print('start_time :', start_time, ', end_time :', end_time)
+    
     flv = CuttingFLV(f)
     tag_iterator = flv.iter_tags()
     last_tag = None
     tag_after_last_tag = None
     first_keyframe_after_start = None
-    is_end = False
+    file_name = get_next_unuse_name(inpath)
+    print('first_file_name:',file_name)
     
     try:
         while True:
@@ -104,9 +111,17 @@ def cut_file(inpath, outpath, start_time, end_time):
             # base our duration computation on that
             if tag.timestamp != 0 and (
                     tag.timestamp <= end_time or end_time == -1):
-                last_tag = tag
+                last_tag = tag #find last tag match the end_time
             elif tag_after_last_tag is None and tag.timestamp != 0:
-                tag_after_last_tag = tag
+                tag_after_last_tag = tag #find tag after last tag match the end_time
+                cut_to_new_file(f, file_name, flv.first_media_tag_offset, last_tag, tag_after_last_tag, first_keyframe_after_start)
+                file_name = get_next_unuse_name(file_name)
+                start_time = start_time + int(interval_time)
+                end_time = start_time + int(interval_time)
+                last_tag = None
+                tag_after_last_tag = None
+                first_keyframe_after_start = None
+                
             if not first_keyframe_after_start and tag.timestamp > start_time:
                 if isinstance(tag, VideoTag):
                     if (tag.frame_type == FRAME_TYPE_KEYFRAME and
@@ -122,11 +137,22 @@ def cut_file(inpath, outpath, start_time, end_time):
         log.error("Unexpected end of file on file `%s'", inpath)
         return False
     except StopIteration:
-        is_end = True
+        cut_to_new_file(f, file_name, flv.first_media_tag_offset, last_tag, tag_after_last_tag, first_keyframe_after_start)
         pass
 
-    if not flv.first_media_tag_offset:
-        log.error("The file `%s' does not have any media content", inpath)
+    f.close()
+    return True
+
+def cut_to_new_file(src_f, tar_file_name, first_media_tag_offset, last_tag, tag_after_last_tag, first_keyframe_after_start):
+    try:
+        fo = open(tar_file_name, 'wb')
+    except IOError as xxx_todo_changeme1:
+        (errno, strerror) = xxx_todo_changeme1.args
+        print("Failed to open `%s': %s"%(tar_file_name, strerror))
+        return False
+    
+    if not first_media_tag_offset:
+        print("The file `%s' does not have any media content"%inpath)
         return False
 
     if not last_tag:
@@ -145,26 +171,22 @@ def cut_file(inpath, outpath, start_time, end_time):
     print("Last tag to output %s"%last_tag)
     print("Tag after last tag %s"%tag_after_last_tag)
 
-    f.seek(0)
-    print("copying up to %d bytes", flv.first_media_tag_offset)
-    fo.write(f.read(flv.first_media_tag_offset))
-    print("seeking to %d bytes", first_keyframe_after_start.offset)
+    src_f.seek(0)
+    print("copying up to %d bytes"%first_media_tag_offset)
+    fo.write(src_f.read(first_media_tag_offset))
+    print("seeking to %d bytes"%first_keyframe_after_start.offset)
     if tag_after_last_tag:
         end_offset = tag_after_last_tag.offset
     else:
-        f.seek(0, 2)
-        end_offset = f.tell()
-    print("end offset %d", end_offset)
-    f.seek(first_keyframe_after_start.offset)
+        src_f.seek(0, 2)
+        end_offset = src_f.tell()
+    print("end offset %d"%end_offset)
+    src_f.seek(first_keyframe_after_start.offset)
 
     copy_bytes = end_offset - first_keyframe_after_start.offset
-    print("copying %d bytes", copy_bytes)
     print("copying %d bytes"%copy_bytes)
-    fo.write(f.read(copy_bytes))
-    f.close()
+    fo.write(src_f.read(copy_bytes))
     fo.close()
-    return is_end
-
 
 def process_options():
     usage = "%prog file outfile"
@@ -230,4 +252,4 @@ if __name__ == '__main__':
     #main()
     log.setLevel({0: logging.ERROR, 1: logging.WARNING,
               2: logging.INFO, 3: logging.DEBUG}[3])
-    cut_file('D:\\test\\1\\123.flv', 'D:\\test\\2\\123.flv', 10000, 20000)
+    cut_file('D:\\test\\1\\123.flv', 0, 60000)
