@@ -9,7 +9,7 @@ from astypes import get_script_data_variable, make_script_data_variable
 
 log = logging.getLogger('flvlib.tags')
 
-STRICT_PARSING = False
+STRICT_PARSING = True
 def strict_parser():
     return globals()['STRICT_PARSING']
 
@@ -223,12 +223,11 @@ class ScriptTag(Tag):
         else:
             # 11 = tag type (1) + data size (3) + timestamp (4) + stream id (3)
             tag_end = self.offset + 11 + self.size
-            print("max offset is 0x%08X", tag_end)
+            print("max offset is 0x%08X"%tag_end)
 
         self.name, self.variable = \
                    get_script_data_variable(f, max_offset=tag_end)
-        print("A script tag with a name of %s and value of %r",
-                  self.name, self.variable)
+        print("A script tag with a name of %s and value of %r"%(self.name, self.variable))
 
     def __repr__(self):
         if self.offset is None:
@@ -282,7 +281,7 @@ class FLV(object):
 
         # File version
         self.version = get_ui8(f)
-        print("File version is %d", self.version)
+        print("File version is %d"%self.version)
 
         # TypeFlags
         flags = get_ui8(f)
@@ -298,13 +297,11 @@ class FLV(object):
             self.has_audio = True
         if flags & 0x1:
             self.has_video = True
-        print("File %s audio",
-                  (self.has_audio and "has") or "does not have")
-        print("File %s video",
-                  (self.has_video and "has") or "does not have")
+        print("File %s audio"%((self.has_audio and "has") or "does not have"))
+        print("File %s video"%((self.has_video and "has") or "does not have"))
 
         header_size = get_ui32(f)
-        print("Header size is %d bytes", header_size)
+        print("Header size is %d bytes"%header_size)
 
         f.seek(header_size)
 
