@@ -294,7 +294,7 @@ def get_script_data_value(f, max_offset=None):
         get_value = as_type_to_getter_and_maker[value_type][0]
     except KeyError:
         raise MalformedFLV("Invalid script data value type: %d", value_type)
-    print("The getter function is %r", get_value)
+    print("The getter function is %r", get_value.__name__)
     value = get_value(f, max_offset=max_offset)
     return value
 

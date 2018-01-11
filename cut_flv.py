@@ -83,98 +83,91 @@ class CuttingFLV(FLV):
             raise MalformedFLV("Invalid tag type: %d", tag_type)
 
 
-def cut_file(inpath, start_time, interval_time):
-    print("Cutting file '%s' interval_time=%s"%(inpath, interval_time))
+def cut_file(inpath):
+    print("Cutting file '%s'"%(inpath))
 
     try:
         f = open(inpath, 'rb')
-    except IOError as xxx_todo_changeme:
-        (errno, strerror) = xxx_todo_changeme.args
-        log.error("Failed to open `%s': %s", inpath, strerror)
-        return False
+    except IOError as e:
+        print(e, inpath)
 
-    if start_time is None:
-        start_time = 0
-    else:
-        start_time = int(start_time)
-        
-    if interval_time is None:
-        end_time = -1
-    else:
-        end_time = start_time + int(interval_time)
+    file_name = get_next_unuse_name(inpath)
+    try:
+        fo = open(file_name, 'wb')
+        print('new out file:', file_name)
+    except IOError as e:
+        print(e, file_name)
 
-    print('start_time :', start_time, ', end_time :', end_time)
-    
     flv = CuttingFLV(f)
     tag_iterator = flv.iter_tags()
-    last_tag = None
-    tag_after_last_tag = None
-    first_keyframe_after_start = None
-    file_name = get_next_unuse_name(inpath)
-    print('first_file_name:',file_name)
     count = 0
-    test_offset = 0
-    
+    header_tag = None
+    thresholdOfKeyFrameCombine = 10
+    countOfKeyFrameCombine = 1
+    startTagTimeStamp = 0
+
+    # get common header part
+    try:
+        while(True):
+            tag = next(tag_iterator)
+            count = count + 1
+            if isinstance(tag, VideoTag) and tag.h264_packet_type == H264_PACKET_TYPE_SEQUENCE_HEADER:
+                print('find header, count = ', count)
+                header_tag = tag
+                break
+    except MalformedFLV as e:
+        print(e)
+    except EndOfFile:
+        print("Unexpected end of file on file `%s' 1"%file_name)
+    except StopIteration:
+        pass
+
     try:
         while True:
             tag = next(tag_iterator)
+            count = count + 1
             # some buggy software, like gstreamer's flvmux, puts a metadata tag
             # at the end of the file with timestamp 0, and we don't want to
             # base our duration computation on that
-            if isinstance(tag, VideoTag):
-                print('VideoTag,', count)
-            elif isinstance(tag, AudioTag):
-                print('AudioTag,', count)
-            elif isinstance(tag, ScriptTag):
-                print('ScriptTag,', count) 
-                test_offset = tag.offset
-                print('test_offset', test_offset)
-            elif isinstance(tag, ScriptAMF3Tag):
-                print('ScriptAMF3Tag,', count)     
-            else:
-                print('unknow tag,',count)  
-   
-            if tag.timestamp != 0 and (
-                    tag.timestamp <= end_time or end_time == -1):
-                last_tag = tag #find last tag match the end_time
-            elif tag_after_last_tag is None and tag.timestamp != 0:
-                tag_after_last_tag = tag #find tag after last tag match the end_time
-                cut_to_new_file(f, file_name, flv.first_media_tag_offset, last_tag, tag_after_last_tag, first_keyframe_after_start)
-                file_name = get_next_unuse_name(file_name)
-                start_time = start_time + int(interval_time)
-                end_time = start_time + int(interval_time)
-                last_tag = None
-                tag_after_last_tag = None
-                first_keyframe_after_start = None
-                
-            if not first_keyframe_after_start and tag.timestamp >= start_time:
-                if isinstance(tag, VideoTag):
-                    if (tag.frame_type == FRAME_TYPE_KEYFRAME and
-                            tag.h264_packet_type == H264_PACKET_TYPE_NALU):
-                        first_keyframe_after_start = tag
-                    first_keyframe_after_start = tag    
-                    print('first_keyframe_after_start ',count)
-                    '''
-                elif flv.no_video:
-                    print('no_video ',count)
-                    first_keyframe_after_start = tag
-                    '''
-            count = count + 1    
+            if isinstance(tag, VideoTag) and tag.frame_type == FRAME_TYPE_KEYFRAME:
+                if countOfKeyFrameCombine > thresholdOfKeyFrameCombine:
+                    countOfKeyFrameCombine = 1
+                    fo.close()
+                    file_name = get_next_unuse_name(file_name)
+                    try:
+                        fo = open(file_name, 'wb')
+                        print('new out file:', file_name)
+                    except IOError as e:
+                        print(e, file_name)
+
+                if countOfKeyFrameCombine == 1:
+                    print('start new frame')
+                    startTagTimeStamp = tag.timestamp
+                    # write common part
+                    oldOffset = f.tell()
+                    f.seek(0)
+                    fo.write(f.read(header_tag.endOffset))
+                    f.seek(oldOffset)
+                countOfKeyFrameCombine = countOfKeyFrameCombine + 1
+
+            try:
+                fo.write(tag.getWholeTagWithTimeOffset(startTagTimeStamp))
+            except EndOfFile:
+                print("Unexpected end of file on file `%s' 2" % file_name)
+
     except MalformedFLV as e:
-        message = e[0] % e[1:]
-        log.error("The file `%s' is not a valid FLV file: %s", inpath, message)
-        return False
-    except EndOfFile:
-        log.error("Unexpected end of file on file `%s'", inpath)
-        return False
-    except StopIteration:
-        cut_to_new_file(f, file_name, flv.first_media_tag_offset, last_tag, tag_after_last_tag, first_keyframe_after_start)
+        print(e)
+    except EndOfFile as e:
+        print(e)
+    except StopIteration as e:
+        print(e)
         pass
 
     f.close()
+    fo.close()
     return True
 
-def cut_to_new_file(src_f, tar_file_name, first_media_tag_offset, last_tag, tag_after_last_tag, first_keyframe_after_start):
+def cut_to_new_file(src_f, tar_file_name, action, last_tag, tag_after_last_tag, first_keyframe_after_start):
     print('enter cut_to_new_file')
     try:
         fo = open(tar_file_name, 'wb')
@@ -299,29 +292,55 @@ def make_flv_complete(file_name):
     
     flv = CuttingFLV(f)
     tag_iterator = flv.iter_tags()
-    last_tag= None
     count = 0
-    
+    startTagTimeStamp = 0
+
     try:
-        while True:
+        while(True):
             tag = next(tag_iterator)
-            last_tag = tag
+            if isinstance(tag, VideoTag) and tag.h264_packet_type == H264_PACKET_TYPE_SEQUENCE_HEADER:
+                try:
+                    oldOffset = f.tell()
+                    f.seek(0)
+                    fo.write(f.read(tag.endOffset))
+                    f.seek(oldOffset)
+                    # print('f.tell()=%d'%(f.tell()))
+                    # print('fo.tell()=%d' % (fo.tell()))
+                except EndOfFile:
+                    print("Unexpected end of file on file `%s' 2"%file_name)
+                finally:
+                    break
             count = count + 1
+
     except MalformedFLV as e:
-        print('first')
+        print(e)
     except EndOfFile:
         print("Unexpected end of file on file `%s' 1"%file_name)
-        
+
     except StopIteration:
         pass
 
-    copy_bytes = last_tag.offset
-    print("copying %d bytes"%copy_bytes)
-    f.seek(0)
     try:
-        fo.write(f.read(copy_bytes))
+        while True:
+            tag = next(tag_iterator)
+            if count > 720:
+                if startTagTimeStamp == 0:
+                    startTagTimeStamp = tag.timestamp
+                    print('startTagTimeStamp=%d'%(startTagTimeStamp))
+                try:
+                    # print('original tag : ', tag.printWholeTag())
+                    fo.write(tag.getWholeTagWithTimeOffset(startTagTimeStamp))
+                except EndOfFile:
+                    print("Unexpected end of file on file `%s' 2"%file_name)
+            count = count + 1
+    except MalformedFLV as e:
+        print(e)
     except EndOfFile:
-        print("Unexpected end of file on file `%s' 2"%file_name)   
+        print("Unexpected end of file on file `%s' 1"%file_name)
+
+    except StopIteration:
+        pass
+
     f.close()
     fo.close()
     
@@ -329,20 +348,24 @@ def make_flv_complete(file_name):
     
     return True
 
-def make_timestamp_start_0(fileIn, fileOut):
+def make_timestamp_start_0(file_name):
     print('make_timestamp_start_0 enter')
     try:
-        f = open(fileIn, 'rb')
+        f = open(file_name, 'rb')
     except IOError as xxx_todo_changeme:
         (errno, strerror) = xxx_todo_changeme.args
-        print("Failed to open `%s': %s"%(inpath, strerror))
+        print("Failed to open `%s': %s" % (inpath, strerror))
         return False
-    
+
+    srcFileName, ext = os.path.splitext(file_name)
+    tarFileName = srcFileName + 'temp' + ext
+    print('create temp file %s' % tarFileName)
+
     try:
-        fo = open(fileOut, 'wb')
+        fo = open(tarFileName, 'wb')
     except IOError as xxx_todo_changeme1:
         (errno, strerror) = xxx_todo_changeme1.args
-        print("Failed to open `%s': %s"%(tar_file_name, strerror))
+        print("Failed to open `%s': %s" % (tar_file_name, strerror))
         return False
     
     flv = CuttingFLV(f)
@@ -365,22 +388,32 @@ def make_timestamp_start_0(fileIn, fileOut):
         while True:
             tag = next(tag_iterator)
             last_tag = tag
-            if not timeStampOffset and isinstance(tag, VideoTag):
-                timeStampOffset
+            if isinstance(tag, VideoTag):
+                print('VideoTag,', tag.__repr__(),' ',count)
+            elif isinstance(tag, AudioTag):
+                print('AudioTag,', tag.__repr__(),' ',count)
+            elif isinstance(tag, ScriptTag):
+                print('ScriptTag,', count)
+                test_offset = tag.offset
+                print('test_offset', test_offset)
+            elif isinstance(tag, ScriptAMF3Tag):
+                print('ScriptAMF3Tag,', count)
+            else:
+                print('unknow tag,',count)
+            print('tag.timestamp=%d'%(tag.timestamp))
             count = count + 1
-            copy_bytes = copy_bytes + tag.size
     except MalformedFLV as e:
-        message = e[0] % e[1:]
-        log.error("The file `%s' is not a valid FLV file: %s", file_name, message)
-        return False
+        print("MalformedFLV, ", e)
     except EndOfFile:
-        print("Unexpected end of file on file `%s' 1"%file_name)
+        print("EndOfFile")
         
     except StopIteration:
+
         pass
 
     try:
-        fo.write(f.read(copy_bytes))
+        f.seek(0)
+        fo.write(f.read(last_tag.offset))
     except EndOfFile:
         print("Unexpected end of file on file `%s' 2"%file_name)   
     f.close()
@@ -390,11 +423,62 @@ def make_timestamp_start_0(fileIn, fileOut):
     
     return True
 
+
+def print_flv(file_name):
+    print('print_flv enter')
+    try:
+        f = open(file_name, 'rb')
+    except IOError as xxx_todo_changeme:
+        (errno, strerror) = xxx_todo_changeme.args
+        print("Failed to open `%s': %s" % (inpath, strerror))
+        return False
+
+    flv = CuttingFLV(f)
+    tag_iterator = flv.iter_tags()
+    count = 0
+    f.seek(0)
+
+    try:
+        while True:
+            tag = next(tag_iterator)
+            if isinstance(tag, VideoTag):
+                print('VideoTag,', tag.__repr__(), ' ', count)
+            elif isinstance(tag, AudioTag):
+                print('AudioTag,', tag.__repr__(), ' ', count)
+            elif isinstance(tag, ScriptTag):
+                print('ScriptTag,', count)
+                test_offset = tag.offset
+                print('test_offset', test_offset)
+            elif isinstance(tag, ScriptAMF3Tag):
+                print('ScriptAMF3Tag,', count)
+            else:
+                print('unknow tag,', count)
+            print('tag.timestamp=%d' % (tag.timestamp))
+            count = count + 1
+    except MalformedFLV as e:
+        print("MalformedFLV, ", e)
+    except EndOfFile:
+        print("EndOfFile")
+
+    except StopIteration:
+
+        pass
+
+    f.close()
+
+    print('print_flv done, count =', count)
+
+    return True
+
+
 if __name__ == '__main__':
     #main()
     log.setLevel({0: logging.ERROR, 1: logging.WARNING,
               2: logging.INFO, 3: logging.DEBUG}[3])
     #cut_file('D:\\test\\1\\123.flv', 0, 1000000)
     #make_flv_complete('D:\\test\\1\\123.flv')
-    #cut_file('D:\\test\\1\\123temp1.flv', 0, 50000)
-    make_flv_complete('F:\\yx\\f3c31deb219b66c09a5084bc7e7120171109225359.30.flv')
+    cut_file('D:\\MY_DownLoad\\11111\\cut\\06cface5632f2f483868bf7e5c20171119周日152859.05.flv')
+    # make_flv_complete('D:\\MY_DownLoad\\11111\\cut\\ff87cc9c283636af2de84ff20171214周四210542.55.flv')
+    # print_flv('D:\\MY_DownLoad\\11111\\cut\\5dd649b8539000b1b320171106周一235929.38.flv')
+    # make_timestamp_start_0('D:\\MY_DownLoad\\11111\\cut\\ff87cc9c283636af2de84ff20171214周四210542.55.flv')
+    #cut_file('D:\\MY_DownLoad\\11111\\cut\\ff87cc9c283636af2de84ff20171214周四210542.55.flv', 0, 20000)

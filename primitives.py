@@ -39,7 +39,11 @@ def get_si32_extended(f):
 
 def make_si32_extended(num):
     ret = struct.pack(">i", num)
-    return ret[1:] + ret[0]
+    # print('make_si32_extended ', ret[1:])
+    # print('make_si32_extended ', [ret[0],])
+    result  = bytes(ret[1:]) + bytes([ret[0],])
+    # print('make_si32_extended ', result, ' ', len(result))
+    return result
 
 
 # UI24

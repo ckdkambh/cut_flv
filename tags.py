@@ -36,17 +36,23 @@ class Tag(object):
         self.offset = None
         self.size = None
         self.timestamp = None
+        self.endOffset = None
 
     def parse(self):
         f = self.f
 
         self.offset = f.tell() - 1
+        # f.seek(self.offset)
+        # print(f.read(11))
+        # f.seek(self.offset+1)
+
 
         # DataSize
         self.size = get_ui24(f)
 
         # Timestamp + TimestampExtended
         self.timestamp = get_si32_extended(f)
+        # print('find a timestamp %d'%self.timestamp)
 
         if self.timestamp < 0:
             log.warning("The tag at offset 0x%08X has negative timestamp: %d",
@@ -61,6 +67,7 @@ class Tag(object):
         self.parse_tag_content()
 
         previous_tag_size = get_ui32(f)
+        self.endOffset = f.tell()
         ensure(previous_tag_size, self.size + 11,
                "PreviousTagSize of %d (0x%08X) "
                "not equal to actual tag size of %d (0x%08X)" %
@@ -71,6 +78,39 @@ class Tag(object):
         # By default just seek past the tag content
         self.f.seek(self.size, os.SEEK_CUR)
 
+    def getWholeTagWithTimeOffset(self, timeOffset):
+        if self.timestamp - timeOffset < 0:
+            raise MalformedFLV('timeOffset eeror')
+
+        f = self.f
+        # print('getWholeTagWithTimeOffset start %d'%(f.tell()))
+
+        # store old file point position
+        oldFileSeek = f.tell()
+        # set file ponit position to current tag
+        f.seek(self.offset)
+
+        outString = f.read(1+3)
+        # print('step 1 ', outString)
+        outString = outString + make_si32_extended(self.timestamp - timeOffset)
+        # print('step 2 ', outString)
+        f.seek(self.offset+1+3+4)
+        outString = outString + f.read(self.size+7)
+        # print('step 3 ', outString)
+
+        # print('getWholeTagWithTimeOffset end 1 %d' % (f.tell()))
+        f.seek(oldFileSeek)
+        # print('getWholeTagWithTimeOffset end 2 %d' % (f.tell()))
+        return outString
+
+    def printWholeTag(self):
+        f = self.f
+        oldFileSeek = f.tell()
+        f.seek(self.offset)
+        outString = f.read(self.endOffset - self.offset)
+
+        f.seek(oldFileSeek)
+        return outString
 
 class AudioTag(Tag):
 
