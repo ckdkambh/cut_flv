@@ -107,9 +107,8 @@ def cut_file(inpath):
     count = 0
     header_tag = None
     sizeThresholdOfKeyFrameCombine = 16000000
-    sizeCountOfKeyFrameCombine = 0
+    sizeCountOfKeyFrameCombine = -1
     startTagTimeStamp = 0
-    isStart = False
 
     # get common header part
     try:
@@ -136,7 +135,8 @@ def cut_file(inpath):
             # at the end of the file with timestamp 0, and we don't want to
             # base our duration computation on that
             if isinstance(tag, VideoTag) and tag.frame_type == FRAME_TYPE_KEYFRAME:
-                isStart = True
+                if sizeCountOfKeyFrameCombine == -1:
+                    sizeCountOfKeyFrameCombine = 0
                 if sizeCountOfKeyFrameCombine > sizeThresholdOfKeyFrameCombine:
                     sizeCountOfKeyFrameCombine = 0
                     fo.close()
@@ -159,7 +159,7 @@ def cut_file(inpath):
                     logger.debug('file_name:%s, test:%s', file_name, test)
                     f.seek(oldOffset)
                     sizeCountOfKeyFrameCombine = sizeCountOfKeyFrameCombine + header_tag.endOffset
-            if isStart:
+            if sizeCountOfKeyFrameCombine >= 0:
                 try:
                     fo.write(tag.getWholeTagWithTimeOffset(startTagTimeStamp))
                     sizeCountOfKeyFrameCombine = sizeCountOfKeyFrameCombine + tag.size
