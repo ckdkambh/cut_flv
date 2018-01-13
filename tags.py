@@ -7,7 +7,7 @@ from constants import *
 from astypes import MalformedFLV
 from astypes import get_script_data_variable, make_script_data_variable
 
-log = logging.getLogger('flvlib.tags')
+logger = logging.getLogger('cut_flv')
 
 STRICT_PARSING = True
 def strict_parser():
@@ -25,7 +25,7 @@ def ensure(value, expected, error_msg):
     if strict_parser():
         raise MalformedFLV(error_msg)
     else:
-        log.warning('Skipping non-conformant value in FLV file')
+        logger.warning(error_msg)
 
 
 class Tag(object):
@@ -43,7 +43,7 @@ class Tag(object):
 
         self.offset = f.tell() - 1
         # f.seek(self.offset)
-        # print(f.read(11))
+        # logger.info(f.read(11))
         # f.seek(self.offset+1)
 
 
@@ -52,10 +52,10 @@ class Tag(object):
 
         # Timestamp + TimestampExtended
         self.timestamp = get_si32_extended(f)
-        # print('find a timestamp %d'%self.timestamp)
+        logger.debug('find a timestamp %d'%self.timestamp)
 
         if self.timestamp < 0:
-            log.warning("The tag at offset 0x%08X has negative timestamp: %d",
+            logger.warning("The tag at offset 0x%08X has negative timestamp: %d",
                         self.offset, self.timestamp)
 
         # StreamID
@@ -80,10 +80,11 @@ class Tag(object):
 
     def getWholeTagWithTimeOffset(self, timeOffset):
         if self.timestamp - timeOffset < 0:
-            raise MalformedFLV('timeOffset eeror')
+            logger.warning('detect timeOffset error, timeOffset=%d,self.timestamp=%d', timeOffset, self.timestamp)
+            return bytes(0)
 
         f = self.f
-        # print('getWholeTagWithTimeOffset start %d'%(f.tell()))
+        logger.debug('getWholeTagWithTimeOffset start %d'%(f.tell()))
 
         # store old file point position
         oldFileSeek = f.tell()
@@ -91,16 +92,16 @@ class Tag(object):
         f.seek(self.offset)
 
         outString = f.read(1+3)
-        # print('step 1 ', outString)
+        logger.debug('step 1 %s', outString)
         outString = outString + make_si32_extended(self.timestamp - timeOffset)
-        # print('step 2 ', outString)
+        logger.debug('step 2 %s', outString)
         f.seek(self.offset+1+3+4)
         outString = outString + f.read(self.size+7)
-        # print('step 3 ', outString)
+        logger.debug('step 3 %s', outString)
 
-        # print('getWholeTagWithTimeOffset end 1 %d' % (f.tell()))
+        logger.debug('getWholeTagWithTimeOffset end 1 %d' % (f.tell()))
         f.seek(oldFileSeek)
-        # print('getWholeTagWithTimeOffset end 2 %d' % (f.tell()))
+        logger.debug('getWholeTagWithTimeOffset end 2 %d' % (f.tell()))
         return outString
 
     def printWholeTag(self):
@@ -263,11 +264,11 @@ class ScriptTag(Tag):
         else:
             # 11 = tag type (1) + data size (3) + timestamp (4) + stream id (3)
             tag_end = self.offset + 11 + self.size
-            print("max offset is 0x%08X"%tag_end)
+            logger.info("max offset is 0x%08X"%tag_end)
 
         self.name, self.variable = \
                    get_script_data_variable(f, max_offset=tag_end)
-        print("A script tag with a name of %s and value of %r"%(self.name, self.variable))
+        logger.info("A script tag with a name of %s and value of %r"%(self.name, self.variable))
 
     def __repr__(self):
         if self.offset is None:
@@ -315,13 +316,13 @@ class FLV(object):
 
         # Do this irrelevant of STRICT_PARSING, to catch bogus files
         if header != b"FLV":
-            print(header)
+            logger.info(header)
             raise MalformedFLV("File signature is incorrect: 0x%X 0x%X 0x%X" %
                                struct.unpack("3B", header))
 
         # File version
         self.version = get_ui8(f)
-        print("File version is %d"%self.version)
+        logger.info("File version is %d"%self.version)
 
         # TypeFlags
         flags = get_ui8(f)
@@ -337,11 +338,11 @@ class FLV(object):
             self.has_audio = True
         if flags & 0x1:
             self.has_video = True
-        print("File %s audio"%((self.has_audio and "has") or "does not have"))
-        print("File %s video"%((self.has_video and "has") or "does not have"))
+        logger.info("File %s audio"%((self.has_audio and "has") or "does not have"))
+        logger.info("File %s video"%((self.has_video and "has") or "does not have"))
 
         header_size = get_ui32(f)
-        print("Header size is %d bytes"%header_size)
+        logger.info("Header size is %d bytes"%header_size)
 
         f.seek(header_size)
 

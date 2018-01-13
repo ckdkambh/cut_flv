@@ -12,7 +12,7 @@ from helpers import OrderedAttrDict, utc
 The AS types and their FLV representations.
 """
 
-log = logging.getLogger('flvlib.astypes')
+logger = logging.getLogger('cut_flv')
 
 
 class MalformedFLV(Exception):
@@ -75,15 +75,15 @@ class ECMAArray(OrderedAttrDict):
 
 def get_ecma_array(f, max_offset=None):
     length = get_ui32(f)
-    print("The ECMA array has approximately %d elements", length)
+    logger.info("The ECMA array has approximately %d elements", length)
     array = ECMAArray()
     while True:
         if max_offset and (f.tell() == max_offset):
-            print("Prematurely terminating reading an ECMA array")
+            logger.info("Prematurely terminating reading an ECMA array")
             break
         marker = get_ui24(f)
         if marker == 9:
-            print("Marker!")
+            logger.info("Marker!")
             break
         else:
             f.seek(-3, os.SEEK_CUR)
@@ -102,7 +102,7 @@ def make_ecma_array(d):
 # Strict Array
 def get_strict_array(f, max_offset=None):
     length = get_ui32(f)
-    print("The length is %d", length)
+    logger.info("The length is %d", length)
     elements = [get_script_data_value(f, max_offset=max_offset)
                 for _ in range(length)]
     return elements
@@ -155,11 +155,11 @@ def get_object(f, max_offset=None):
     ret = FLVObject()
     while True:
         if max_offset and (f.tell() == max_offset):
-            print("Prematurely terminating reading an object")
+            logger.info("Prematurely terminating reading an object")
             break
         marker = get_ui24(f)
         if marker == 9:
-            print("Marker!")
+            logger.info("Marker!")
             break
         else:
             f.seek(-3, os.SEEK_CUR)
@@ -274,14 +274,14 @@ type_to_as_type = {
 # SCRIPTDATAVARIABLE
 def get_script_data_variable(f, max_offset=None):
     name = get_string(f)
-    print("The name is %s", name)
+    logger.info("The name is %s", name)
     value = get_script_data_value(f, max_offset=max_offset)
-    print("The value is %r", value)
+    logger.info("The value is %r", value)
     return (name, value)
 
 def make_script_data_variable(name, value):
-    print("The name is %s", name)
-    print("The value is %r", value)
+    logger.info("The name is %s", name)
+    logger.info("The value is %r", value)
     ret = make_string(name) + make_script_data_value(value)
     return ret
 
@@ -289,22 +289,22 @@ def make_script_data_variable(name, value):
 # SCRIPTDATAVALUE
 def get_script_data_value(f, max_offset=None):
     value_type = get_ui8(f)
-    print("The value type is %r", value_type)
+    logger.info("The value type is %r", value_type)
     try:
         get_value = as_type_to_getter_and_maker[value_type][0]
     except KeyError:
         raise MalformedFLV("Invalid script data value type: %d", value_type)
-    print("The getter function is %r", get_value.__name__)
+    logger.info("The getter function is %r", get_value.__name__)
     value = get_value(f, max_offset=max_offset)
     return value
 
 def make_script_data_value(value):
     value_type = type_to_as_type.get(value.__class__, VALUE_TYPE_OBJECT)
-    print("The value type is %r", value_type)
+    logger.info("The value type is %r", value_type)
     #  KeyError can't happen here, because we always fall back on
     #  VALUE_TYPE_OBJECT when determining value_type
     make_value = as_type_to_getter_and_maker[value_type][1]
-    print("The maker function is %r", make_value)
+    logger.info("The maker function is %r", make_value)
     type_tag = make_ui8(value_type)
     ret = make_value(value)
     return type_tag + ret
