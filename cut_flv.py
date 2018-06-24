@@ -84,7 +84,8 @@ class CuttingFLV(FLV):
         try:
             return tag_to_class[tag_type]
         except KeyError:
-            raise MalformedFLV("Invalid tag type: %d", tag_type)
+            logger.error('Invalid tag type: %d', tag_type)
+            return None
 
 
 def cut_file(inpath):
@@ -114,6 +115,8 @@ def cut_file(inpath):
     try:
         while(True):
             tag = next(tag_iterator)
+            if tag == None:
+                continue
             count = count + 1
             if isinstance(tag, VideoTag) and tag.h264_packet_type == H264_PACKET_TYPE_SEQUENCE_HEADER:
                 logger.info('find header, count=%d', count)
@@ -129,6 +132,8 @@ def cut_file(inpath):
     try:
         while True:
             tag = next(tag_iterator)
+            if tag == None:
+                continue
             count = count + 1
             logger.debug('sizeCountOfKeyFrameCombine:%d, sizeThresholdOfKeyFrameCombine:%d', sizeCountOfKeyFrameCombine, sizeThresholdOfKeyFrameCombine)
             # some buggy software, like gstreamer's flvmux, puts a metadata tag
@@ -337,6 +342,8 @@ def print_flv(file_name):
     try:
         while True:
             tag = next(tag_iterator)
+            if tag == None:
+                continue
             if isinstance(tag, VideoTag):
                 logger.info('VideoTag, %s, %s', tag.__repr__(), count)
             elif isinstance(tag, AudioTag):
@@ -396,6 +403,6 @@ if __name__ == '__main__':
     #make_flv_complete('D:\\test\\1\\123.flv')
     # cut_file('D:\\MY_DownLoad\\11111\\cut\\3f04895cb8790520171008周日131210.29.flv.flv')
     # make_flv_complete('D:\\MY_DownLoad\\11111\\cut\\ff87cc9c283636af2de84ff20171214周四210542.55.flv')
-    # print_flv('D:\\MY_DownLoad\\11111\\cut\\1d85227b537905dadb41fdaa7f64fa20171121周二231030.28.flv_clip(3)(1)(1).flv')
+    # print_flv('D:\\MY_DownLoad\\11111\\cut\\4c0a5e8f572ff422e80393f5606d0a1d.flv')
     # make_timestamp_start_0('D:\\MY_DownLoad\\11111\\cut\\ff87cc9c283636af2de84ff20171214周四210542.55.flv')
     #cut_file('D:\\MY_DownLoad\\11111\\cut\\ff87cc9c283636af2de84ff20171214周四210542.55.flv', 0, 20000)

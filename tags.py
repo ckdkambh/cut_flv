@@ -9,7 +9,7 @@ from astypes import get_script_data_variable, make_script_data_variable
 
 logger = logging.getLogger('cut_flv')
 
-STRICT_PARSING = True
+STRICT_PARSING = False
 def strict_parser():
     return globals()['STRICT_PARSING']
 
@@ -21,11 +21,7 @@ class EndOfTags(Exception):
 def ensure(value, expected, error_msg):
     if value == expected:
         return
-
-    if strict_parser():
-        raise MalformedFLV(error_msg)
-    else:
-        logger.warning(error_msg)
+    logger.debug(error_msg)
 
 
 class Tag(object):
@@ -96,9 +92,9 @@ class Tag(object):
         outString = outString + make_si32_extended(self.timestamp - timeOffset)
         logger.debug('step 2 %s', outString)
         f.seek(self.offset+1+3+4)
-        outString = outString + f.read(self.size+7)
+        outString = outString + f.read(self.size+3)
         logger.debug('step 3 %s', outString)
-
+        outString = outString + make_ui32(self.size + 11)
         logger.debug('getWholeTagWithTimeOffset end 1 %d' % (f.tell()))
         f.seek(oldFileSeek)
         logger.debug('getWholeTagWithTimeOffset end 2 %d' % (f.tell()))
@@ -370,17 +366,21 @@ class FLV(object):
             raise EndOfTags
 
         tag_klass = self.tag_type_to_class(tag_type)
-        tag = tag_klass(self, f)
+        if tag_klass != None:
+            tag = tag_klass(self, f)
 
-        tag.parse()
+            tag.parse()
 
-        return tag
+            return tag
+        else:
+            return None
 
     def tag_type_to_class(self, tag_type):
         try:
             return tag_to_class[tag_type]
         except KeyError:
-            raise MalformedFLV("Invalid tag type: %d", tag_type)
+            logger.error('Invalid tag type: %d', tag_type)
+            return None
 
 
 def create_flv_tag(type, data, timestamp=0):
