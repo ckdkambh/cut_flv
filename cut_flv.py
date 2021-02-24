@@ -88,7 +88,7 @@ class CuttingFLV(FLV):
             return None
 
 
-def cut_file(inpath):
+def cut_file(inpath, flvFileObj):
     logger.info("Cutting file %s"%(inpath))
 
     try:
@@ -96,38 +96,52 @@ def cut_file(inpath):
     except IOError as e:
         logger.error(e, inpath)
 
-    file_name = get_next_unuse_name(inpath)
-    try:
-        fo = open(file_name, 'wb')
-        logger.info('new out file:%s', file_name)
-    except IOError as e:
-        logger.error(e, file_name)
-
     flv = CuttingFLV(f)
     tag_iterator = flv.iter_tags()
     count = 0
-    header_tag = None
     sizeThresholdOfKeyFrameCombine = 16000000
-    sizeCountOfKeyFrameCombine = -1
-    startTagTimeStamp = 0
 
-    # get common header part
-    try:
-        while(True):
-            tag = next(tag_iterator)
-            if tag == None:
-                continue
-            count = count + 1
-            if isinstance(tag, VideoTag) and tag.h264_packet_type == H264_PACKET_TYPE_SEQUENCE_HEADER:
-                logger.info('find header, count=%d', count)
-                header_tag = tag
-                break
-    except MalformedFLV as e:
-        logger.error(e)
-    except EndOfFile:
-        logger.error("Unexpected end of file on file %s 1"%file_name)
-    except StopIteration:
-        pass
+    if not flvFileObj:
+        flvFileObj = {}
+
+        file_name = get_next_unuse_name(inpath)
+        flvFileObj['file_name'] = file_name
+        try:
+            fo = open(file_name, 'wb')
+            logger.info('new out file:%s', file_name)
+        except IOError as e:
+            logger.error(e, file_name)
+        flvFileObj['fo'] = fo
+
+        sizeCountOfKeyFrameCombine = -1
+        startTagTimeStamp = 0
+
+        header_tag = None
+        # get common header part
+        try:
+            while(True):
+                tag = next(tag_iterator)
+                if tag == None:
+                    continue
+                count = count + 1
+                if isinstance(tag, VideoTag) and tag.h264_packet_type == H264_PACKET_TYPE_SEQUENCE_HEADER:
+                    logger.info('find header, count=%d', count)
+                    header_tag = tag
+                    break
+        except MalformedFLV as e:
+            logger.error(e)
+        except EndOfFile:
+            logger.error("Unexpected end of file on file %s 1"%file_name)
+        except StopIteration:
+            pass
+
+        flvFileObj['header_tag'] = header_tag
+    else:
+        fo = flvFileObj['fo']
+        sizeCountOfKeyFrameCombine = flvFileObj['sizeCountOfKeyFrameCombine']
+        startTagTimeStamp = flvFileObj['startTagTimeStamp']
+        header_tag = flvFileObj['header_tag']
+        file_name = flvFileObj['file_name']
 
     try:
         while True:
@@ -143,6 +157,7 @@ def cut_file(inpath):
                 if sizeCountOfKeyFrameCombine == -1:
                     sizeCountOfKeyFrameCombine = 0
                 if sizeCountOfKeyFrameCombine > sizeThresholdOfKeyFrameCombine:
+                    flvFileObj = None
                     sizeCountOfKeyFrameCombine = 0
                     fo.close()
                     file_name = get_next_unuse_name(file_name)
@@ -181,8 +196,12 @@ def cut_file(inpath):
         pass
 
     f.close()
-    fo.close()
-    return True
+    if not flvFileObj:
+        fo.close()
+    else:
+        flvFileObj['sizeCountOfKeyFrameCombine'] = sizeCountOfKeyFrameCombine
+        flvFileObj['startTagTimeStamp'] = startTagTimeStamp
+    return flvFileObj
 
 def make_flv_complete(file_name):
     logger.info('make flv complete')
@@ -398,7 +417,9 @@ if __name__ == '__main__':
 
     logger.info('############start cut_flv program####################')
     List = getAllFlvFile('D:\\MY_DownLoad\\11111\\cut\\')
-    [cut_file(x) for x in List]
+    fileObj = None
+    for i in List:
+        fileObj = cut_file(i, fileObj)
     #cut_file('D:\\test\\1\\123.flv', 0, 1000000)
     #make_flv_complete('D:\\test\\1\\123.flv')
     # cut_file('D:\\MY_DownLoad\\11111\\cut\\3f04895cb8790520171008周日131210.29.flv.flv')
